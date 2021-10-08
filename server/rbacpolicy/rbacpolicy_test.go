@@ -107,6 +107,41 @@ p, cam, applications, %s/argoproj.io/Rollout/resume, my-proj/*, allow
 	assert.False(t, enf.Enforce(claims, "applications", ActionAction+"/argoproj.io/Rollout/resume", "my-proj/my-app"))
 }
 
+func TestEnforceApplicationManagedResourcePolicies(t *testing.T) {
+	kubeclientset := fake.NewSimpleClientset(test.NewFakeConfigMap())
+	projLister := test.NewFakeProjLister(newFakeProj())
+	enf := rbac.NewEnforcer(kubeclientset, test.FakeArgoCDNamespace, common.ArgoCDConfigMapName, nil)
+	enf.EnableLog(true)
+	_ = enf.SetBuiltinPolicy(`p, alice, applications, delete, my-proj/*, allow
+p, bob, applications, delete, my-proj/*/apps/Deployment, allow
+p, bob, applications, delete, my-proj/*/Pod, allow
+`)
+	rbacEnf := NewRBACPolicyEnforcer(enf, projLister)
+	enf.SetClaimsEnforcerFunc(rbacEnf.EnforceClaims)
+
+	// Alice has approval to delete entire apps
+	claims := jwt.MapClaims{"sub": "alice"}
+	assert.True(t, enf.Enforce(claims, "applications", "delete", "my-proj/my-app"))
+	claims = jwt.MapClaims{"sub": "alice"}
+	assert.True(t, enf.Enforce(claims, "applications", "delete", "my-proj/my-app/apps/Deployment"))
+	claims = jwt.MapClaims{"sub": "alice"}
+	assert.True(t, enf.Enforce(claims, "applications", "delete", "my-proj/my-app/Pod"))
+	// Bob has approval to delete Deployments and Pods within an app
+	claims = jwt.MapClaims{"sub": "bob"}
+	assert.False(t, enf.Enforce(claims, "applications", "delete", "my-proj/my-app"))
+	claims = jwt.MapClaims{"sub": "bob"}
+	assert.True(t, enf.Enforce(claims, "applications", "delete", "my-proj/my-app/apps/Deployment"))
+	claims = jwt.MapClaims{"sub": "bob"}
+	assert.True(t, enf.Enforce(claims, "applications", "delete", "my-proj/my-app/Pod"))
+	// Cam does not have approval for any actions
+	claims = jwt.MapClaims{"sub": "cam"}
+	assert.False(t, enf.Enforce(claims, "applications", "delete", "my-proj/my-app"))
+	claims = jwt.MapClaims{"sub": "cam"}
+	assert.False(t, enf.Enforce(claims, "applications", "delete", "my-proj/my-app/apps/Deployment"))
+	claims = jwt.MapClaims{"sub": "cam"}
+	assert.False(t, enf.Enforce(claims, "applications", "delete", "my-proj/my-app/Pod"))
+}
+
 func TestGetScopes_DefaultScopes(t *testing.T) {
 	rbacEnforcer := NewRBACPolicyEnforcer(nil, nil)
 

@@ -919,8 +919,18 @@ func (s *Server) getAppResource(ctx context.Context, action string, q *applicati
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if err := s.enf.EnforceErr(ctx.Value("claims"), rbacpolicy.ResourceApplications, action, appRBACName(*a)); err != nil {
-		return nil, nil, nil, err
+
+	applicationResource := appRBACName(*a)
+	var applicationManagedResource string
+	if q.Group == "" {
+		applicationManagedResource = fmt.Sprintf("%s/%s", applicationResource, q.Kind)
+	} else {
+		applicationManagedResource = fmt.Sprintf("%s/%s/%s", applicationResource, q.Group, q.Kind)
+	}
+	if err := s.enf.EnforceErr(ctx.Value("claims"), rbacpolicy.ResourceApplications, action, applicationResource); err != nil {
+		if err := s.enf.EnforceErr(ctx.Value("claims"), rbacpolicy.ResourceApplications, action, applicationManagedResource); err != nil {
+			return nil, nil, nil, err
+		}
 	}
 
 	tree, err := s.getAppResources(ctx, a)
@@ -1027,9 +1037,6 @@ func (s *Server) DeleteResource(ctx context.Context, q *application.ApplicationR
 	}
 	res, config, a, err := s.getAppResource(ctx, rbacpolicy.ActionDelete, resourceRequest)
 	if err != nil {
-		return nil, err
-	}
-	if err := s.enf.EnforceErr(ctx.Value("claims"), rbacpolicy.ResourceApplications, rbacpolicy.ActionDelete, appRBACName(*a)); err != nil {
 		return nil, err
 	}
 	var deleteOption metav1.DeleteOptions
